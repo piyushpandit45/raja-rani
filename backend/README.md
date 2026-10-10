@@ -27,3 +27,8 @@ or emulator can reach it. If Metro and the API are on different hosts, set
 `EXPO_PUBLIC_API_URL` to the API's reachable base URL (for example,
 `http://192.168.1.20:8000`) and restart Expo. Use a LAN address for a physical
 device; `localhost` on the device refers to the device itself.
+
+The service exposes `GET /health` as a plain-text process health check and
+retains `GET /api/health` for a database connectivity check. During application
+lifespan, a background task pings the deployed Render `/health` URL every 14
+minutes and logs successful status codes or network failures.

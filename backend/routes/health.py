@@ -1,10 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import PlainTextResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import PyMongoError
 
 from backend.database import get_database
 
 router = APIRouter(prefix="/api", tags=["health"])
+root_router = APIRouter(tags=["health"])
+
+
+@root_router.get("/health", response_class=PlainTextResponse, status_code=200)
+async def root_health_check() -> str:
+    return "OK"
 
 
 @router.get("/health")

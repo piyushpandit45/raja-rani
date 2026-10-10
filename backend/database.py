@@ -1,11 +1,13 @@
+import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo import ASCENDING, DESCENDING
 
 from backend.config import get_settings
+from backend.keep_alive import run_keep_alive
 
 
 @asynccontextmanager
@@ -21,6 +23,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.mongo_client = client
     app.state.database = client.get_database(settings.db_name)
+    keep_alive_task: asyncio.Task[None] | None = None
     try:
         await app.state.database.command("ping")
         await app.state.database.users.create_index("username_key", unique=True)
@@ -37,9 +40,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             [("game_type", ASCENDING), ("user_id", ASCENDING)],
             unique=True,
         )
+        keep_alive_task = asyncio.create_task(
+            run_keep_alive(),
+            name="render-keep-alive",
+        )
         yield
     finally:
-        client.close()
+        try:
+            if keep_alive_task is not None:
+                keep_alive_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await keep_alive_task
+        finally:
+            client.close()
 
 
 def get_database(request: Request) -> AsyncIOMotorDatabase:

@@ -2,6 +2,11 @@
 
 # dependencies
 node_modules/
+.venv/
+backend/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
 
 # Expo
 .expo/
@@ -32,6 +37,8 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+backend/.env
 
 # typescript
 *.tsbuildinfo

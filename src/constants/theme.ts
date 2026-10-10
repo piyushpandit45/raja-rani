@@ -1,6 +1,6 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * Raja & Rani - Royal Luxe Theme
+ * Dark royal aesthetic with cyan (Raja) and rose (Rani) accents
  */
 
 import '@/global.css';
@@ -16,25 +16,35 @@ export const Colors = {
     textSecondary: '#60646C',
   },
   dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
+    text: '#F8FAFC',
+    background: '#0B0F19',
+    backgroundElement: '#1E293B',
+    backgroundSelected: '#111827',
+    textSecondary: '#94A3B8',
   },
+} as const;
+
+export const RoyalColors = {
+  background: '#0B0F19',
+  card: '#1E293B',
+  cardDark: '#111827',
+  raja: '#06B6D4',
+  rajaLight: '#38BDF8',
+  rani: '#F43F5E',
+  raniLight: '#FB7185',
+  gold: '#F59E0B',
+  textPrimary: '#F8FAFC',
+  textSecondary: '#94A3B8',
+  neonBorder: '#38BDF8',
 } as const;
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
     sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
     serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
     rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
     mono: 'ui-monospace',
   },
   default: {

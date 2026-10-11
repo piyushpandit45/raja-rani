@@ -1,1 +1,8 @@
--r backend/requirements.txt
+fastapi
+uvicorn
+pydantic
+pymongo
+motor
+mangum
+python-jose
+passlib

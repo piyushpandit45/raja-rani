@@ -60,3 +60,18 @@ Join our community of developers creating universal apps.
 The asynchronous FastAPI and MongoDB backend setup is documented in
 [backend/README.md](./backend/README.md). Configure `EXPO_PUBLIC_API_URL` in the
 Expo environment to enable account authentication and background match uploads.
+
+## Android APK build
+
+The EAS `production` profile builds an installable APK and reads
+`EXPO_PUBLIC_API_URL` from the EAS `production` environment. Set this variable
+to the deployed Vercel API base URL in EAS and in the root `.env` for local Expo
+development. To create the APK:
+
+```bash
+npx eas-cli build --platform android --profile production
+```
+
+This app is linked to its EAS project. EAS Build will manage Android signing
+credentials when prompted. The APK can be installed directly on an Android
+device; use an AAB profile instead when preparing a Google Play Store release.

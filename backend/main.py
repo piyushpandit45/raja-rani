@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from mangum import Mangum
 
 from backend.config import get_settings
 from backend.database import lifespan
@@ -23,3 +24,5 @@ app.include_router(games.router)
 app.include_router(leaderboard.router)
 app.include_router(health.router)
 app.include_router(health.root_router)
+
+handler = Mangum(app)

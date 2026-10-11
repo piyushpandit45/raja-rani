@@ -6,7 +6,12 @@ import GameConfigModal, {
 import RuleModal from '@/components/RuleModal';
 import { RoyalColors, Spacing } from '@/constants/theme';
 import { GameType } from '@/utils/gameRulesData';
-import { deletePlayerName, deleteAccessToken, getPlayerName } from '@/utils/storage';
+import {
+  deleteAccessToken,
+  deletePlayerName,
+  deleteUserSession,
+  getPlayerName,
+} from '@/utils/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -87,9 +92,16 @@ export default function HomeScreen() {
   };
 
   const handleLogout = async () => {
-    await deletePlayerName();
-    await deleteAccessToken();
-    router.replace('/');
+    try {
+      await Promise.all([
+        deletePlayerName(),
+        deleteAccessToken(),
+        deleteUserSession(),
+      ]);
+      router.replace('/');
+    } catch (error) {
+      console.error('Unable to switch users:', error);
+    }
   };
 
   const games = [

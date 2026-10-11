@@ -1,12 +1,13 @@
 import { RoyalColors } from '@/constants/theme';
-import { onboardPlayer } from '@/services/api';
-import { setPlayerName } from '@/utils/storage';
+import { ApiNetworkError, onboardPlayer } from '@/services/api';
+import { getAccessToken, setPlayerName, setUserSession } from '@/utils/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  Alert,
   Dimensions,
   Easing,
   Keyboard,
@@ -315,6 +316,16 @@ export default function WelcomeScreen() {
     try {
       const user = await onboardPlayer(trimmedName, numericAge);
       await setPlayerName(user.username);
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error('The server did not return a valid login session.');
+      }
+      await setUserSession({
+        user_id: user.id,
+        name: user.username,
+        token,
+        onboarded: true,
+      });
       setCelebrationName(user.username);
       setCelebrating(true);
       Animated.parallel([
@@ -336,11 +347,18 @@ export default function WelcomeScreen() {
       });
     } catch (error) {
       console.error('Unable to save onboarding profile:', error);
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : 'Unable to save your profile. Please try again.',
-      );
+      if (error instanceof ApiNetworkError) {
+        Alert.alert(
+          'Network Error',
+          'Turn on your mobile data or Wi-Fi to enter the game.',
+        );
+      } else {
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : 'Unable to save your profile. Please try again.',
+        );
+      }
     } finally {
       setLoading(false);
     }

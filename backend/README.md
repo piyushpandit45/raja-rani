@@ -29,6 +29,18 @@ or emulator can reach it. If Metro and the API are on different hosts, set
 device; `localhost` on the device refers to the device itself.
 
 The service exposes `GET /health` as a plain-text process health check and
-retains `GET /api/health` for a database connectivity check. During application
-lifespan, a background task pings the deployed Render `/health` URL every 14
-minutes and logs successful status codes or network failures.
+retains `GET /api/health` for a database connectivity check. The MongoDB client
+is created once per serverless instance and reused across warm invocations; the
+connection pool is capped to limit connections when Vercel scales out.
+
+## Vercel deployment
+
+Deploy from the repository root so Vercel can load `vercel.json`, the root
+`main.py` handler, and `requirements.txt`. Configure `MONGO_URI`, `DB_NAME`, and
+a unique random `SECRET_KEY` as Vercel environment variables. The other backend
+settings are optional and use their documented defaults.
+
+Set `EXPO_PUBLIC_API_URL` to the deployed Vercel base URL in the EAS
+`production` environment (and in the root `.env` for local Expo builds). The
+production EAS profile reads this environment instead of embedding a
+provider-specific URL in source control.

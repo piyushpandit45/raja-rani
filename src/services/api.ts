@@ -68,6 +68,13 @@ export class ApiError extends Error {
   }
 }
 
+export class ApiNetworkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ApiNetworkError';
+  }
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -81,27 +88,54 @@ async function request<T>(
   }
 
   const token = authenticated ? await getAccessToken() : null;
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  });
-
-  if (!response.ok) {
-    let message = `API request failed (${response.status})`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    let response: Response;
     try {
-      const body = await response.json() as { detail?: string | { status?: string } };
-      if (typeof body.detail === 'string') message = body.detail;
+      response = await fetch(`${API_BASE_URL}${path}`, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...options.headers,
+        },
+      });
     } catch (error) {
-      console.warn('Unable to parse API error response:', error);
+      if (controller.signal.aborted) {
+        throw new ApiNetworkError('The request timed out.');
+      }
+      throw new ApiNetworkError(
+        error instanceof Error ? error.message : 'Unable to reach the server.',
+      );
     }
-    throw new ApiError(message, response.status);
-  }
 
-  return response.json() as Promise<T>;
+    if (!response.ok) {
+      let message = `API request failed (${response.status})`;
+      try {
+        const body = await response.json() as { detail?: string | { status?: string } };
+        if (typeof body.detail === 'string') message = body.detail;
+      } catch (error) {
+        if (controller.signal.aborted) {
+          throw new ApiNetworkError('The request timed out.');
+        }
+        console.warn('Unable to parse API error response:', error);
+      }
+      throw new ApiError(message, response.status);
+    }
+
+    try {
+      return await response.json() as T;
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new ApiNetworkError('The request timed out.');
+      }
+      throw error;
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function saveAuthResponse(response: AuthResponse): Promise<ApiUser> {

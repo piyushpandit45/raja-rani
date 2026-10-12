@@ -23,6 +23,8 @@ export interface Edge {
 export interface SOSState {
   grid: ('' | 'S' | 'O')[][];
   currentPlayer: 1 | 2;
+  player1Score?: number;
+  player2Score?: number;
 }
 
 // Sholo Guti specific types
@@ -102,26 +104,120 @@ export class DotsBoxesAI {
   }
 
   private static getHardMove(state: DotsBoxesState, moves: Edge[]): Edge {
-    // Priority 1: Complete a box
-    const completingMoves = moves.filter((move) =>
-      this.willCompleteBox(state, move)
-    );
+    const control = { deadline: Date.now() + 65, nodes: 0, timedOut: false };
+    const rootMoves = this.orderMoves(state, moves).slice(0, 5);
+    let bestMove = rootMoves[0];
 
-    if (completingMoves.length > 0) {
-      return this.getEasyMove(completingMoves);
+    for (let depth = 1; depth <= 5; depth++) {
+      let iterationMove = bestMove;
+      let iterationScore = Number.NEGATIVE_INFINITY;
+      let alpha = Number.NEGATIVE_INFINITY;
+
+      for (const move of rootMoves) {
+        const child = this.applyMove(state, move);
+        const score = this.search(child, depth - 1, alpha, Number.POSITIVE_INFINITY, state.currentPlayer, control);
+        if (control.timedOut) break;
+        if (score > iterationScore) {
+          iterationScore = score;
+          iterationMove = move;
+        }
+        alpha = Math.max(alpha, iterationScore);
+      }
+
+      if (control.timedOut) break;
+      bestMove = iterationMove;
     }
 
-    // Priority 2: Evaluate moves based on chain avoidance
-    const scoredMoves = moves.map((move) => ({
-      move,
-      score: this.evaluateMove(state, move),
-    }));
+    return bestMove;
+  }
 
-    scoredMoves.sort((a, b) => b.score - a.score);
+  private static orderMoves(state: DotsBoxesState, moves: Edge[]): Edge[] {
+    return moves
+      .map((move) => ({ move, score: this.evaluateMove(state, move) }))
+      .sort((a, b) => b.score - a.score)
+      .map(({ move }) => move);
+  }
 
-    // Pick from top 3 best moves to add some variety
-    const topMoves = scoredMoves.slice(0, Math.min(3, scoredMoves.length));
-    return this.getEasyMove(topMoves.map((m) => m.move));
+  private static applyMove(state: DotsBoxesState, move: Edge): DotsBoxesState {
+    const horizontalLines = state.horizontalLines.map((line) => [...line]);
+    const verticalLines = state.verticalLines.map((line) => [...line]);
+    const boxes = state.boxes.map((line) => [...line]);
+    if (move.type === 'horizontal') horizontalLines[move.row][move.col] = true;
+    else verticalLines[move.row][move.col] = true;
+
+    let completedBoxes = 0;
+    const adjacentBoxes = move.type === 'horizontal'
+      ? [[move.row - 1, move.col], [move.row, move.col]]
+      : [[move.row, move.col - 1], [move.row, move.col]];
+    for (const [row, col] of adjacentBoxes) {
+      if (
+        row >= 0 && row < boxes.length &&
+        col >= 0 && col < boxes[row].length &&
+        boxes[row][col] === 0
+      ) {
+        const boxState = { ...state, horizontalLines, verticalLines };
+        if (this.countBoxEdges(boxState, row, col) === 4) {
+          boxes[row][col] = state.currentPlayer;
+          completedBoxes++;
+        }
+      }
+    }
+
+    return {
+      horizontalLines,
+      verticalLines,
+      boxes,
+      currentPlayer: completedBoxes > 0
+        ? state.currentPlayer
+        : state.currentPlayer === 1 ? 2 : 1,
+    };
+  }
+
+  private static search(
+    state: DotsBoxesState,
+    depth: number,
+    alpha: number,
+    beta: number,
+    rootPlayer: 1 | 2,
+    control: { deadline: number; nodes: number; timedOut: boolean },
+  ): number {
+    if (control.nodes++ >= 1800 || Date.now() >= control.deadline) {
+      control.timedOut = true;
+      return 0;
+    }
+    if (depth === 0) return this.evaluateState(state, rootPlayer);
+
+    const legalMoves = this.getLegalMoves(state);
+    if (legalMoves.length === 0) return this.evaluateState(state, rootPlayer);
+    const maximizing = state.currentPlayer === rootPlayer;
+    const candidates = this.orderMoves(state, legalMoves).slice(0, 5);
+    let value = maximizing ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+
+    for (const move of candidates) {
+      const score = this.search(this.applyMove(state, move), depth - 1, alpha, beta, rootPlayer, control);
+      if (control.timedOut) return 0;
+      if (maximizing) {
+        value = Math.max(value, score);
+        alpha = Math.max(alpha, value);
+      } else {
+        value = Math.min(value, score);
+        beta = Math.min(beta, value);
+      }
+      if (beta <= alpha) break;
+    }
+    return value;
+  }
+
+  private static evaluateState(state: DotsBoxesState, rootPlayer: 1 | 2): number {
+    let score = 0;
+    for (const row of state.boxes) {
+      for (const owner of row) {
+        if (owner === rootPlayer) score += 100;
+        else if (owner !== 0) score -= 100;
+      }
+    }
+    const completingMoves = this.getLegalMoves(state).filter((move) => this.willCompleteBox(state, move)).length;
+    return score + (state.currentPlayer === rootPlayer ? completingMoves : -completingMoves) * 8;
   }
 
   private static willCompleteBox(state: DotsBoxesState, move: Edge): boolean {
@@ -342,65 +438,157 @@ export class SOSAI {
   }
 
   private static getHardMove(state: SOSState, emptyCells: { row: number; col: number }[]): { row: number; col: number; letter: 'S' | 'O' } {
-    // Priority 1: Complete an SOS
-    for (const cell of emptyCells) {
-      for (const letter of ['S', 'O'] as const) {
-        if (this.willCompleteSOS(state, cell.row, cell.col, letter)) {
-          return { ...cell, letter };
+    const control = { deadline: Date.now() + 65, nodes: 0, timedOut: false };
+    const rootMoves = this.orderMoves(state, emptyCells).slice(0, 4);
+    let bestMove = rootMoves[0];
+
+    for (let depth = 1; depth <= 5; depth++) {
+      let iterationMove = bestMove;
+      let iterationScore = Number.NEGATIVE_INFINITY;
+      let alpha = Number.NEGATIVE_INFINITY;
+      for (const move of rootMoves) {
+        const child = this.applyMove(state, move);
+        const score = this.search(child, depth - 1, alpha, Number.POSITIVE_INFINITY, state.currentPlayer, control);
+        if (control.timedOut) break;
+        if (score > iterationScore) {
+          iterationScore = score;
+          iterationMove = move;
         }
+        alpha = Math.max(alpha, iterationScore);
       }
+      if (control.timedOut) break;
+      bestMove = iterationMove;
     }
+    return bestMove;
+  }
 
-    // Priority 2: Evaluate cells based on strategic value
-    const scoredCells = emptyCells.map((cell) => ({
-      cell,
-      score: this.evaluateCell(state, cell.row, cell.col),
-    }));
+  private static orderMoves(
+    state: SOSState,
+    emptyCells: { row: number; col: number }[],
+  ): { row: number; col: number; letter: 'S' | 'O' }[] {
+    const promisingMoves = emptyCells.flatMap((cell) => (['S', 'O'] as const).map((letter) => ({
+      ...cell,
+      letter,
+      score: this.evaluateCell(state, cell.row, cell.col) +
+        (this.willCompleteSOS(state, cell.row, cell.col, letter) ? 100 : 0),
+    })))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 12);
 
-    scoredCells.sort((a, b) => b.score - a.score);
+    return promisingMoves
+      .map((move) => ({
+        ...move,
+        score: move.score - (this.willGiveSOSAfterMove(state, move.row, move.col, move.letter) ? 20 : 0),
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4)
+      .map(({ row, col, letter }) => ({ row, col, letter }));
+  }
 
-    const topCells = scoredCells.slice(0, Math.min(3, scoredCells.length));
-    const bestCell = this.getEasyMove(topCells.map((c) => c.cell));
+  private static applyMove(
+    state: SOSState,
+    move: { row: number; col: number; letter: 'S' | 'O' },
+  ): SOSState {
+    const grid = state.grid.map((line) => [...line]);
+    grid[move.row][move.col] = move.letter;
+    const points = this.countSOS(grid, move.row, move.col);
+    const player1Score = (state.player1Score ?? 0) + (state.currentPlayer === 1 ? points : 0);
+    const player2Score = (state.player2Score ?? 0) + (state.currentPlayer === 2 ? points : 0);
+    return {
+      grid,
+      player1Score,
+      player2Score,
+      currentPlayer: points > 0 ? state.currentPlayer : state.currentPlayer === 1 ? 2 : 1,
+    };
+  }
 
-    // Choose letter strategically
-    const letter = this.chooseLetter(state, bestCell.row, bestCell.col);
-    return { ...bestCell, letter };
+  private static search(
+    state: SOSState,
+    depth: number,
+    alpha: number,
+    beta: number,
+    rootPlayer: 1 | 2,
+    control: { deadline: number; nodes: number; timedOut: boolean },
+  ): number {
+    if (control.nodes++ >= 1200 || Date.now() >= control.deadline) {
+      control.timedOut = true;
+      return 0;
+    }
+    if (depth === 0) return this.evaluateState(state, rootPlayer);
+
+    const emptyCells = state.grid.flatMap((line, row) =>
+      line.flatMap((cell, col) => cell === '' ? [{ row, col }] : []),
+    );
+    if (emptyCells.length === 0) return this.evaluateState(state, rootPlayer);
+    const maximizing = state.currentPlayer === rootPlayer;
+    const candidates = this.orderMoves(state, emptyCells);
+    let value = maximizing ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+
+    for (const move of candidates) {
+      const score = this.search(this.applyMove(state, move), depth - 1, alpha, beta, rootPlayer, control);
+      if (control.timedOut) return 0;
+      if (maximizing) {
+        value = Math.max(value, score);
+        alpha = Math.max(alpha, value);
+      } else {
+        value = Math.min(value, score);
+        beta = Math.min(beta, value);
+      }
+      if (beta <= alpha) break;
+    }
+    return value;
+  }
+
+  private static evaluateState(state: SOSState, rootPlayer: 1 | 2): number {
+    const scoreDifference = (state.player1Score ?? 0) - (state.player2Score ?? 0);
+    return rootPlayer === 1 ? scoreDifference * 100 : -scoreDifference * 100;
   }
 
   private static willCompleteSOS(state: SOSState, row: number, col: number, letter: 'S' | 'O'): boolean {
-    const tempGrid = state.grid.map(r => [...r]);
-    tempGrid[row][col] = letter;
-    return this.countSOS(tempGrid, row, col) > 0;
+    state.grid[row][col] = letter;
+    const completesSOS = this.countSOS(state.grid, row, col) > 0;
+    state.grid[row][col] = '';
+    return completesSOS;
   }
 
   private static willGiveSOS(state: SOSState, row: number, col: number, letter: 'S' | 'O'): boolean {
-    const tempGrid = state.grid.map(r => [...r]);
+    const tempGrid = state.grid.map((line) => [...line]);
     tempGrid[row][col] = letter;
-
-    // Check if placing this letter allows opponent to complete SOS on their next turn
-    // This is a simplified check - in a full implementation, we'd check all adjacent cells
     const directions = [
       [0, 1], [0, -1], [1, 0], [-1, 0],
       [1, 1], [1, -1], [-1, 1], [-1, -1],
     ];
 
     for (const [dr, dc] of directions) {
-      const nr = row + dr;
-      const nc = col + dc;
+      const nextRow = row + dr;
+      const nextCol = col + dc;
+      if (nextRow < 0 || nextRow >= 10 || nextCol < 0 || nextCol >= 10 || tempGrid[nextRow][nextCol] !== '') continue;
 
-      if (nr >= 0 && nr < 10 && nc >= 0 && nc < 10 && tempGrid[nr][nc] === '') {
-        // Check if opponent could complete SOS by placing S or O here
-        for (const oppLetter of ['S', 'O'] as const) {
-          tempGrid[nr][nc] = oppLetter;
-          if (this.countSOS(tempGrid, nr, nc) > 0) {
-            return true;
-          }
-          tempGrid[nr][nc] = '';
+      for (const opponentLetter of ['S', 'O'] as const) {
+        tempGrid[nextRow][nextCol] = opponentLetter;
+        if (this.countSOS(tempGrid, nextRow, nextCol) > 0) return true;
+        tempGrid[nextRow][nextCol] = '';
+      }
+    }
+    return false;
+  }
+
+  private static willGiveSOSAfterMove(state: SOSState, row: number, col: number, letter: 'S' | 'O'): boolean {
+    state.grid[row][col] = letter;
+    let givesSOS = false;
+    for (let candidateRow = Math.max(0, row - 2); candidateRow <= Math.min(9, row + 2) && !givesSOS; candidateRow++) {
+      for (let candidateCol = Math.max(0, col - 2); candidateCol <= Math.min(9, col + 2) && !givesSOS; candidateCol++) {
+        if (state.grid[candidateRow][candidateCol] !== '') continue;
+        for (const opponentLetter of ['S', 'O'] as const) {
+          state.grid[candidateRow][candidateCol] = opponentLetter;
+          givesSOS = this.countSOS(state.grid, candidateRow, candidateCol) > 0;
+          state.grid[candidateRow][candidateCol] = '';
+          if (givesSOS) break;
         }
       }
     }
-
-    return false;
+    state.grid[row][col] = '';
+    return givesSOS;
   }
 
   private static evaluateCell(state: SOSState, row: number, col: number): number {
@@ -428,10 +616,9 @@ export class SOSAI {
 
   private static countSOS(grid: ('' | 'S' | 'O')[][], row: number, col: number): number {
     let count = 0;
-    const directions = [
-      [0, 1], [0, -1], [1, 0], [-1, 0], // Horizontal, Vertical
-      [1, 1], [1, -1], [-1, 1], [-1, -1], // Diagonals
-    ];
+    const directions = grid[row][col] === 'O'
+      ? [[0, 1], [1, 0], [1, 1], [1, -1]]
+      : [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 
     for (const [dr, dc] of directions) {
       // Check if this cell forms SOS in this direction
@@ -490,7 +677,7 @@ export class SholoGutiAI {
     }
 
     const captureMoves = legalMoves.filter((move) => move.isCapture);
-    if (captureMoves.length > 0) {
+    if (difficulty !== 'hard' && captureMoves.length > 0) {
       return this.getEasyMove(captureMoves);
     }
 
@@ -546,31 +733,142 @@ export class SholoGutiAI {
   }
 
   private static getHardMove(state: SholoGutiState, moves: { from: number; to: number; isCapture: boolean }[]): { from: number; to: number } {
-    // Priority 1: Execute capture moves
-    const captureMoves = moves.filter((move) => move.isCapture);
+    const control = { deadline: Date.now() + 65, nodes: 0, timedOut: false };
+    const captures = moves.filter((move) => move.isCapture);
+    const choices = captures.length > 0 ? captures : moves;
+    const orderedMoves = this.orderMoves(state, choices, null).slice(0, 4);
+    let bestMove = orderedMoves[0];
 
-    if (captureMoves.length > 0) {
-      // Prefer multi-capture opportunities
-      const multiCaptureMoves = captureMoves.filter((move) =>
-        this.canContinueCapture(state, move.to)
-      );
-
-      if (multiCaptureMoves.length > 0) {
-        return this.getEasyMove(multiCaptureMoves);
+    for (let depth = 1; depth <= 5; depth++) {
+      let iterationMove = bestMove;
+      let iterationScore = Number.NEGATIVE_INFINITY;
+      let alpha = Number.NEGATIVE_INFINITY;
+      for (const move of orderedMoves) {
+        const child = this.applyMove(state, move);
+        const score = this.search(child.state, child.forcedNode, depth - 1, alpha, Number.POSITIVE_INFINITY, state.currentPlayer, control);
+        if (control.timedOut) break;
+        if (score > iterationScore) {
+          iterationScore = score;
+          iterationMove = move;
+        }
+        alpha = Math.max(alpha, iterationScore);
       }
-      return this.getEasyMove(captureMoves);
+      if (control.timedOut) break;
+      bestMove = iterationMove;
+    }
+    return { from: bestMove.from, to: bestMove.to };
+  }
+
+  private static orderMoves(
+    state: SholoGutiState,
+    moves: { from: number; to: number; isCapture: boolean }[],
+    forcedNode: number | null,
+  ): { from: number; to: number; isCapture: boolean }[] {
+    return moves
+      .map((move) => ({ move, score: this.evaluateMove(state, move) }))
+      .sort((a, b) => b.score - a.score)
+      .map(({ move }) => move)
+      .filter((move) => forcedNode === null || (move.from === forcedNode && move.isCapture));
+  }
+
+  private static getSearchMoves(
+    state: SholoGutiState,
+    forcedNode: number | null,
+  ): { from: number; to: number; isCapture: boolean }[] {
+    if (forcedNode !== null) {
+      return getValidMoves(forcedNode, state.pieces)
+        .filter((move) => move.isCapture)
+        .map((move) => ({ from: forcedNode, to: move.to, isCapture: true }));
+    }
+    const moves = this.getLegalMoves(state);
+    const captures = moves.filter((move) => move.isCapture);
+    return captures.length > 0 ? captures : moves;
+  }
+
+  private static applyMove(
+    state: SholoGutiState,
+    move: { from: number; to: number; isCapture: boolean },
+  ): { state: SholoGutiState; forcedNode: number | null } {
+    const pieces = [...state.pieces];
+    pieces[move.from] = 0;
+    pieces[move.to] = state.currentPlayer;
+    if (move.isCapture) {
+      const jumpedNode = getValidMoves(move.from, state.pieces)
+        .find((candidate) => candidate.to === move.to)?.capturedNode;
+      if (jumpedNode !== undefined) pieces[jumpedNode] = 0;
+      if (getValidMoves(move.to, pieces).some((candidate) => candidate.isCapture)) {
+        return { state: { pieces, currentPlayer: state.currentPlayer }, forcedNode: move.to };
+      }
+    }
+    return {
+      state: { pieces, currentPlayer: state.currentPlayer === 1 ? 2 : 1 },
+      forcedNode: null,
+    };
+  }
+
+  private static search(
+    state: SholoGutiState,
+    forcedNode: number | null,
+    depth: number,
+    alpha: number,
+    beta: number,
+    rootPlayer: 1 | 2,
+    control: { deadline: number; nodes: number; timedOut: boolean },
+  ): number {
+    if (control.nodes++ >= 1400 || Date.now() >= control.deadline) {
+      control.timedOut = true;
+      return 0;
+    }
+    const moves = this.getSearchMoves(state, forcedNode);
+    if (depth === 0 || moves.length === 0) {
+      if (moves.length === 0) return state.currentPlayer === rootPlayer ? -100000 : 100000;
+      return this.evaluateState(state, rootPlayer);
     }
 
-    // Priority 2: Evaluate moves using heuristic
-    const scoredMoves = moves.map((move) => ({
-      move,
-      score: this.evaluateMove(state, move),
-    }));
+    const maximizing = state.currentPlayer === rootPlayer;
+    const candidates = this.orderMoves(state, moves, forcedNode).slice(0, 4);
+    let value = maximizing ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+    for (const move of candidates) {
+      const child = this.applyMove(state, move);
+      const score = this.search(child.state, child.forcedNode, depth - 1, alpha, beta, rootPlayer, control);
+      if (control.timedOut) return 0;
+      if (maximizing) {
+        value = Math.max(value, score);
+        alpha = Math.max(alpha, value);
+      } else {
+        value = Math.min(value, score);
+        beta = Math.min(beta, value);
+      }
+      if (beta <= alpha) break;
+    }
+    return value;
+  }
 
-    scoredMoves.sort((a, b) => b.score - a.score);
+  private static evaluateState(state: SholoGutiState, rootPlayer: 1 | 2): number {
+    const opponent = rootPlayer === 1 ? 2 : 1;
+    let material = 0;
+    for (const piece of state.pieces) {
+      if (piece === rootPlayer) material++;
+      else if (piece === opponent) material--;
+    }
 
-    const topMoves = scoredMoves.slice(0, Math.min(3, scoredMoves.length));
-    return this.getEasyMove(topMoves.map((m) => m.move));
+    let rootMobility = 0;
+    let opponentMobility = 0;
+    let rootThreats = 0;
+    let opponentThreats = 0;
+    for (let node = 0; node < state.pieces.length; node++) {
+      if (state.pieces[node] === rootPlayer) {
+        const moves = getValidMoves(node, state.pieces);
+        rootMobility += moves.length;
+        rootThreats += moves.filter((move) => move.isCapture).length;
+      } else if (state.pieces[node] === opponent) {
+        const moves = getValidMoves(node, state.pieces);
+        opponentMobility += moves.length;
+        opponentThreats += moves.filter((move) => move.isCapture).length;
+      }
+    }
+    return material * 1000 + (rootMobility - opponentMobility) * 3 +
+      (rootThreats - opponentThreats) * 35;
   }
 
   private static isDangerous(state: SholoGutiState, move: { from: number; to: number; isCapture: boolean }): boolean {
@@ -585,7 +883,7 @@ export class SholoGutiAI {
       if (tempPieces[node] === opponent) {
         const opponentMoves = getValidMoves(node, tempPieces);
         for (const oppMove of opponentMoves) {
-          if (oppMove.isCapture && oppMove.to === move.to) {
+          if (oppMove.isCapture && oppMove.capturedNode === move.to) {
             return true;
           }
         }

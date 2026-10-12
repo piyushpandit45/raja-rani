@@ -223,6 +223,8 @@ export default function SosGameScreen() {
           const state: SOSState = {
             grid,
             currentPlayer,
+            player1Score,
+            player2Score,
           };
 
           const move = SOSAI.getMove(state, difficulty);
